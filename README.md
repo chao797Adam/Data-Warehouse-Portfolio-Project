@@ -1,3 +1,4 @@
+
 # Medallion Architecture (Bronze / Silver / Gold) in Databricks
 
 ## 1. Project Overview
@@ -8,8 +9,6 @@ This project implements a Medallion Data Architecture in Databricks using dbt. T
 - **Tools:** Databricks (Spark SQL), dbt
 - **Architecture:** Bronze (Raw) -> Silver (Cleaned) -> Gold (Business Ready)
 
-![Cleaned CRM Product Flow](assets/cleaned%20crm%20prod.png)
-
 ### 💡 Tech Stack & Architecture Choices
 
 - **OLTP vs. OLAP:** The reference tutorial uses **SQL Server** (OLTP), optimized for transactions and raw data. This project uses **Databricks** (OLAP), optimized for analytics and aggregations.
@@ -17,11 +16,10 @@ This project implements a Medallion Data Architecture in Databricks using dbt. T
 - **Declarative Approach:** Instead of manually writing `DROP TABLE` and `INSERT INTO`, dbt handles table materialization, dependency ordering, and data lineage automatically.
 
 ### 🧐 Why SQL Server uses Stored Procedures (`CREATE OR ALTER PROCEDURE`)
-In the reference tutorial, the author wraps the Silver layer transformations inside a Stored Procedure (`silver.load_silver`). This is a classic pattern in traditional data warehousing (like SQL Server or Oracle) for several reasons:
-1. **Batching & Orchestration:** A single procedure can execute all tables sequentially. You only need to schedule one job (e.g., SQL Server Agent) to run `EXEC silver.load_silver`.
-2. **Idempotency via Truncate-Load:** The procedure explicitly runs `TRUNCATE TABLE` followed by `INSERT INTO`. This ensures that if the job fails halfway, or runs multiple times, you don't get duplicate data.
-3. **Error Handling:** T-SQL procedures support `TRY...CATCH` blocks, allowing the job to stop gracefully if one table fails.
-4. **The dbt Alternative:** In modern data stacks using dbt, **Stored Procedures are no longer needed**. dbt acts as the orchestrator. By defining models and using the `{{ ref() }}` function, dbt automatically builds a DAG (Directed Acyclic Graph), handles the execution order, and manages table creation and truncation (via `materialized='table'`). It replaces the entire `CREATE PROCEDURE` logic with clean, modular, version-controlled SQL.
+In the reference tutorial, the author wraps the Silver layer transformations inside a Stored Procedure (`silver.load_silver`). This is a classic pattern in traditional data warehousing for several reasons:
+1. **Batching & Orchestration:** A single procedure can execute all tables sequentially.
+2. **Idempotency via Truncate-Load:** The procedure explicitly runs `TRUNCATE TABLE` followed by `INSERT INTO` to prevent duplicates.
+3. **The dbt Alternative:** In modern data stacks using dbt, **Stored Procedures are no longer needed**. dbt acts as the orchestrator. By using `{{ ref() }}`, dbt automatically builds a DAG, handles execution order, and manages table truncation (via `materialized='table'`). It replaces the entire `CREATE PROCEDURE` logic with clean, modular SQL.
 
 ---
 
@@ -31,7 +29,6 @@ Before and after applying transformations, the data is profiled to identify anom
 
 ### A. Check for Unwanted Spaces (`TRIM`)
 ```sql
--- Check how many rows have leading/trailing spaces in the raw table
 SELECT prd_key, prd_nm
 FROM crm_dbt_dev.bronze.bronze_crm_prd
 WHERE prd_key != TRIM(prd_key) OR prd_nm != TRIM(prd_nm);
@@ -39,7 +36,6 @@ WHERE prd_key != TRIM(prd_key) OR prd_nm != TRIM(prd_nm);
 
 ### B. Check for Duplicates (`HAVING COUNT > 1`)
 ```sql
--- Find duplicate primary keys in the raw data
 SELECT prd_id, prd_key, COUNT(*) as duplicate_count
 FROM crm_dbt_dev.bronze.bronze_crm_prd
 GROUP BY prd_id, prd_key
@@ -48,7 +44,6 @@ HAVING COUNT(*) > 1;
 
 ### C. Check for Out-of-Range Dates (Birthdates)
 ```sql
--- Identify impossible birthdates (e.g., before 1924 or in the future)
 SELECT DISTINCT bdate
 FROM crm_dbt_dev.bronze.bronze_erp_cust_az12
 WHERE bdate < '1924-01-01' OR bdate > current_date();
@@ -57,15 +52,12 @@ WHERE bdate < '1924-01-01' OR bdate > current_date();
 ### D. Post-Cleaning Validations (on Silver Tables)
 ```sql
 -- 1. Data Standardization (Product Line)
--- Should only return: 'Mountain', 'Road', 'Other Sales', 'Touring', 'n/a'
 SELECT DISTINCT prd_line FROM crm_dbt_dev.silver.silver_crm_prd_info;
 
 -- 2. Invalid Date Orders (SCD Overlap Check)
--- Should return 0 rows
 SELECT * FROM crm_dbt_dev.silver.silver_crm_prd_info WHERE prd_end_dt < prd_start_dt;
 
 -- 3. Business Rules (Sales Amount Integrity)
--- Should return 0 rows. Ensures no nulls, zeros, negatives, or mismatched totals.
 SELECT * FROM crm_dbt_dev.silver.silver_crm_sales_details
 WHERE sls_sales != sls_quantity * sls_price
    OR sls_sales IS NULL OR sls_quantity IS NULL OR sls_price IS NULL
@@ -161,6 +153,8 @@ from source_data;
 ### B. Product Tables (CRM + ERP)
 
 #### CRM (`silver_crm_prd_info.sql`)
+This model handles SCD Type 2 logic, fixing overlapping dates without losing history.
+
 ```sql
 {{ config(materialized='table', schema='silver') }}
 with
@@ -201,6 +195,11 @@ with
     )
 select * from step2_rebuild_timeline;
 ```
+
+**Result Validation:**
+The following image shows the successful execution in Databricks. You can clearly see how the overlapping historical dates (`orig_start_dt` / `orig_end_dt`) have been perfectly aligned into a clean timeline (`prd_start_dt` / `prd_end_dt`) without any gaps or overlaps.
+
+![Cleaned CRM Product Flow](assets/cleaned%20crm%20prod.png)
 
 #### ERP (`silver_erp_px_cat_g1v2.sql`)
 ```sql
