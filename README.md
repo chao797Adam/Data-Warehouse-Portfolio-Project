@@ -9,6 +9,11 @@ This project implements a Medallion Data Architecture in Databricks using dbt. T
 - **Tools:** Databricks (Spark SQL), dbt
 - **Architecture:** Bronze (Raw) -> Silver (Cleaned) -> Gold (Business Ready)
 
+### 🗺️ Data Architecture & Lineage
+The following diagram illustrates the complete data flow, including source systems, Bronze ingestion, Silver standardization, and the final Gold Star Schema.
+
+![Data Architecture](assets/data_flow.png)
+
 ### 💡 Tech Stack & Architecture Choices
 
 - **OLTP vs. OLAP:** The reference tutorial uses **SQL Server** (OLTP), optimized for transactions and raw data. This project uses **Databricks** (OLAP), optimized for analytics and aggregations.
@@ -97,7 +102,7 @@ from source_data;
 
 #### CRM (`silver_crm_cust_info.sql`)
 ```sql
-{{ config(materialized='table', schema='silver') }}
+{{ config(materialized='table', schema='silver', alias='crm_cust_info') }}
 with
     source_data as (
         select * from {{ source('bronze_source', 'bronze_crm_cust') }}
@@ -156,7 +161,7 @@ from source_data;
 This model handles SCD Type 2 logic, fixing overlapping dates without losing history.
 
 ```sql
-{{ config(materialized='table', schema='silver') }}
+{{ config(materialized='table', schema='silver', alias='crm_prd_info') }}
 with
     source_data as (select * from {{ source('bronze_source', 'bronze_crm_prd') }}),
     step1_base as (
@@ -219,7 +224,7 @@ from source_data;
 
 ### C. Sales Table (`silver_crm_sales_details.sql`)
 ```sql
-{{ config(materialized='table', schema='silver') }}
+{{ config(materialized='table', schema='silver', alias='crm_sales_details') }}
 with
     source_data as (select * from {{ source('bronze_source', 'bronze_crm_sales_details') }}),
     filtered_data as (select * from source_data where sls_ord_num is not null),
@@ -265,6 +270,7 @@ select * from cleaned_data;
 ```text
 crm_dbt/
 ├── assets/
+│   ├── data_flow.png
 │   └── cleaned crm prod.png
 ├── crm_dbt_in/
 │   ├── analyses/
