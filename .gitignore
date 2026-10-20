@@ -1,0 +1,12 @@
+# dbt
+crm_dbt_in/target/
+crm_dbt_in/dbt_packages/
+crm_dbt_in/logs/
+crm_dbt_in/package-lock.yml
+
+# Credentials (Never commit passwords)
+profiles.yml
+
+# IDE & OS
+.vscode/
+.DS_Store

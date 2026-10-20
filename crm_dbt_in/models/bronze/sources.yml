@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: bronze_source
+    database: crm_dbt_dev
+    schema: bronze
+    tables:
+      - name: bronze_crm_cust
+      - name: bronze_crm_prd
+      - name: bronze_crm_sales_details
+      
+      - name: bronze_erp_cust_az12
+      - name: bronze_erp_loc_a101
+      - name: bronze_erp_px_cat_g1v2

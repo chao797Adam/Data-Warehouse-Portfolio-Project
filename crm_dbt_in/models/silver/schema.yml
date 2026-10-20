@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  # ==========================================
+  # Silver: Customer Info
+  # ==========================================
+  - name: silver_crm_cust_info
+    description: "Cleaned and deduplicated CRM customer data"
+    columns:
+      - name: cst_id
+        description: "Primary key for customer"
+        tests:
+          - unique
+          - not_null
+
+  # ==========================================
+  # Silver: Sales Details
+  # ==========================================
+  - name: silver_crm_sales_details
+    description: "Cleaned sales transactions with business rule validations"
+    columns:
+      - name: sls_quantity
+        description: "Quantity of products ordered"
+        tests:
+          # Rule: Quantity cannot be negative or zero
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              
+      - name: sls_sales
+        description: "Total sales amount"
+        tests:
+          # Rule: Sales cannot be null, zero, or negative
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+              
+      - name: sls_price
+        description: "Unit price of the product"
+        tests:
+          # Rule: Price cannot be null, zero, or negative
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"

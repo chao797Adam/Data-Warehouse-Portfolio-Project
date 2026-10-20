@@ -1,0 +1,16 @@
+# dbt
+target/
+dbt_packages/
+logs/
+package-lock.yml
+
+# Credentials
+profiles.yml
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.DS_Store
