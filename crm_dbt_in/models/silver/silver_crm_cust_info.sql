@@ -1,4 +1,10 @@
 -- models/silver/silver_crm_cust_info.sql
+{{ config(
+    materialized='table',
+    schema='silver',
+    alias='crm_cust_info'
+) }}
+
 with
     source_data as (
         -- Reference the bronze source table
