@@ -1,9 +1,8 @@
-
 # Medallion Architecture (Bronze / Silver / Gold) in Databricks
 
 ## 1. Project Overview
 
-This project implements a Medallion Data Architecture in Databricks using dbt. The goal is to ingest raw CRM and ERP data, rigorously clean and standardize it in the Silver layer, and build a unified analytical fact table in the Gold layer.
+This project implements a Medallion Data Architecture in Databricks using dbt. The goal is to ingest raw CRM and ERP data, rigorously clean and standardize it in the Silver layer, and build a unified analytical Star Schema in the Gold layer.
 
 - **Source Systems:** CRM, ERP
 - **Tools:** Databricks (Spark SQL), dbt
@@ -17,14 +16,7 @@ The following diagram illustrates the complete data flow, including source syste
 ### 💡 Tech Stack & Architecture Choices
 
 - **OLTP vs. OLAP:** The reference tutorial uses **SQL Server** (OLTP), optimized for transactions and raw data. This project uses **Databricks** (OLAP), optimized for analytics and aggregations.
-- **Schema Definition:** In the traditional SQL Server tutorial, explicit `CREATE TABLE` statements are required to define column data types and schemas. In this project using dbt, **manual DDL is not needed**. dbt automatically infers schemas and creates tables based on the `SELECT` logic.
-- **Declarative Approach:** Instead of manually writing `DROP TABLE` and `INSERT INTO`, dbt handles table materialization, dependency ordering, and data lineage automatically.
-
-### 🧐 Why SQL Server uses Stored Procedures (`CREATE OR ALTER PROCEDURE`)
-In the reference tutorial, the author wraps the Silver layer transformations inside a Stored Procedure (`silver.load_silver`). This is a classic pattern in traditional data warehousing for several reasons:
-1. **Batching & Orchestration:** A single procedure can execute all tables sequentially.
-2. **Idempotency via Truncate-Load:** The procedure explicitly runs `TRUNCATE TABLE` followed by `INSERT INTO` to prevent duplicates.
-3. **The dbt Alternative:** In modern data stacks using dbt, **Stored Procedures are no longer needed**. dbt acts as the orchestrator. By using `{{ ref() }}`, dbt automatically builds a DAG, handles execution order, and manages table truncation (via `materialized='table'`). It replaces the entire `CREATE PROCEDURE` logic with clean, modular SQL.
+- **dbt vs. Traditional T-SQL:** In the traditional SQL Server tutorial, explicit `CREATE TABLE` statements and Stored Procedures (`CREATE OR ALTER PROCEDURE`) with `TRY...CATCH` and `TRUNCATE/INSERT` are used. In this project using dbt, **manual DDL is not needed**. dbt acts as the orchestrator, automatically resolving dependencies via `{{ ref() }}`, managing materializations (Table/View), and building a DAG.
 
 ---
 
@@ -79,18 +71,10 @@ WHERE sls_sales != sls_quantity * sls_price
 ```sql
 {{ config(materialized='table', schema='silver', alias='erp_customers') }}
 with
-    source_data as (
-        select * from {{ source('bronze_source', 'bronze_erp_cust_az12') }}
-    )
+    source_data as (select * from {{ source('bronze_source', 'bronze_erp_cust_az12') }})
 select
-    case 
-        when cid like 'NAS%' then substring(cid, 4)
-        else cid
-    end as cid,
-    case 
-        when bdate < '1924-01-01' or bdate > current_date() then null 
-        else bdate 
-    end as bdate,
+    case when cid like 'NAS%' then substring(cid, 4) else cid end as cid,
+    case when bdate < '1924-01-01' or bdate > current_date() then null else bdate end as bdate,
     case 
         when upper(trim(gen)) in ('M', 'MALE') then 'Male'
         when upper(trim(gen)) in ('F', 'FEMALE') then 'Female'
@@ -104,9 +88,7 @@ from source_data;
 ```sql
 {{ config(materialized='table', schema='silver', alias='crm_cust_info') }}
 with
-    source_data as (
-        select * from {{ source('bronze_source', 'bronze_crm_cust') }}
-    ),
+    source_data as (select * from {{ source('bronze_source', 'bronze_crm_cust') }}),
     filtered_data as (select * from source_data where cst_id is not null),
     deduplicated as (
         select *, row_number() over (partition by cst_id order by cst_create_date desc) as rn
@@ -136,9 +118,7 @@ where rn = 1;
 ```sql
 {{ config(materialized='table', schema='silver', alias='erp_locations') }}
 with
-    source_data as (
-        select * from {{ source('bronze_source', 'bronze_erp_loc_a101') }}
-    )
+    source_data as (select * from {{ source('bronze_source', 'bronze_erp_loc_a101') }})
 select
     replace(trim(cid), '-', '') as cid,
     case 
@@ -210,9 +190,7 @@ The following image shows the successful execution in Databricks. You can clearl
 ```sql
 {{ config(materialized='table', schema='silver', alias='erp_product_categories') }}
 with
-    source_data as (
-        select * from {{ source('bronze_source', 'bronze_erp_px_cat_g1v2') }}
-    )
+    source_data as (select * from {{ source('bronze_source', 'bronze_erp_px_cat_g1v2') }})
 select
     trim(id) as id,
     trim(cat) as cat,
@@ -233,18 +211,9 @@ with
             trim(sls_ord_num) as sls_ord_num,
             trim(sls_prd_key) as sls_prd_key,
             sls_cust_id,
-            case 
-                when sls_order_dt = 0 or length(cast(sls_order_dt as string)) != 8 then null
-                else to_date(cast(sls_order_dt as string), 'yyyyMMdd')
-            end as sls_order_dt,
-            case 
-                when sls_ship_dt = 0 or length(cast(sls_ship_dt as string)) != 8 then null
-                else to_date(cast(sls_ship_dt as string), 'yyyyMMdd')
-            end as sls_ship_dt,
-            case 
-                when sls_due_dt = 0 or length(cast(sls_due_dt as string)) != 8 then null
-                else to_date(cast(sls_due_dt as string), 'yyyyMMdd')
-            end as sls_due_dt,
+            case when sls_order_dt = 0 or length(cast(sls_order_dt as string)) != 8 then null else to_date(cast(sls_order_dt as string), 'yyyyMMdd') end as sls_order_dt,
+            case when sls_ship_dt = 0 or length(cast(sls_ship_dt as string)) != 8 then null else to_date(cast(sls_ship_dt as string), 'yyyyMMdd') end as sls_ship_dt,
+            case when sls_due_dt = 0 or length(cast(sls_due_dt as string)) != 8 then null else to_date(cast(sls_due_dt as string), 'yyyyMMdd') end as sls_due_dt,
             case
                 when sls_sales is null or sls_sales <= 0 or sls_sales != sls_quantity * abs(sls_price) 
                 then sls_quantity * abs(sls_price)
@@ -264,19 +233,133 @@ select * from cleaned_data;
 
 ---
 
-## 4. dbt Project Structure & Tests
+## 4. Gold Layer: Star Schema & Architecture
+
+### 🏗️ Architecture Choice: Star Schema vs. OBT (One Big Table)
+A common question is: *Why not just join everything into one giant flat table (OBT) at the Silver layer?*
+While OBTs are simple for one-off queries, this project implements a **Star Schema (Fact + Dimensions)** for the following enterprise-grade reasons:
+1. **Decoupling:** Dimensions (Customers, Products) are decoupled from the Fact table. If a customer changes their address, we only update one row in `dim_customers`, rather than rewriting millions of historical sales records in an OBT.
+2. **Storage Efficiency:** An OBT duplicates customer names and product names for every single sales transaction. A Star Schema stores dimension attributes only once.
+3. **BI Performance:** Modern BI tools (Tableau, PowerBI) are optimized for Star Schemas. They cache dimensions and use Surrogate Keys to perform lightning-fast joins.
+
+### ⚙️ Execution Order: Dims First, Fact Last
+Because the Fact table depends on the Surrogate Keys (`customer_key`, `product_key`) generated in the Dimension tables, the **execution order is strictly: Dimensions -> Fact**.
+In dbt, this is automatically handled by the DAG when using `{{ ref() }}`. When running manually, use:
+```bash
+# Step 1: Build Dimensions
+dbt run --select dim_customers dim_products
+# Step 2: Build Fact
+dbt run --select fct_sales
+```
+
+### 🔗 Gold Join Relationship
+The following diagram illustrates how the Fact table joins with the Dimension tables using Surrogate Keys and Business Keys.
+
+![Gold Join Relation](assets/gold_join_relation.png)
+
+### A. Dimensions (`dim_customers` & `dim_products`)
+
+#### `dim_customers.sql`
+```sql
+{{ config(materialized='table', schema='gold') }}
+
+select
+    -- Generate Surrogate Key
+    row_number() over (order by c.cst_id) as customer_key,
+    
+    -- Business Keys
+    c.cst_id as customer_id,
+    c.cst_key,
+    
+    -- Descriptive columns
+    c.cst_firstname,
+    c.cst_lastname,
+    c.cst_marital_status,
+    
+    -- Trust CRM as the primary source, fallback to ERP if CRM is null or 'n/a'
+    case 
+        when c.cst_gndr is not null and c.cst_gndr != 'n/a' then c.cst_gndr
+        else coalesce(e.gen, 'n/a')
+    end as gender,
+    
+    e.bdate as birthdate,
+    l.cntry as country,
+    c.dwh_create_date
+from {{ ref('crm_cust_info') }} c
+left join {{ ref('erp_customers') }} e on c.cst_key = e.cid
+left join {{ ref('erp_locations') }} l on c.cst_key = l.cid;
+```
+
+#### `dim_products.sql`
+```sql
+{{ config(materialized='table', schema='gold') }}
+
+select
+    -- Generate Surrogate Key
+    row_number() over (order by p.prd_id, p.prd_start_dt) as product_key,
+    
+    -- Business Keys
+    p.prd_id,
+    p.prd_key,
+    p.sls_prd_key,
+    
+    -- Descriptive columns
+    p.prd_nm,
+    p.prd_cost,
+    p.prd_line,
+    p.cat_id,
+    c.cat as category_name,
+    c.subcat as subcategory_name,
+    p.dwh_create_date
+from {{ ref('crm_prd_info') }} p
+left join {{ ref('erp_product_categories') }} c on p.cat_id = c.id
+-- Only keep the current active product state to prevent fan-out
+where p.prd_end_dt is null;
+```
+
+### B. Fact Table (`fct_sales.sql`)
+```sql
+{{ config(materialized='table', schema='gold') }}
+
+select
+    -- Fact Metrics
+    s.sls_ord_num,
+    s.sls_order_dt,
+    s.sls_sales,
+    s.sls_quantity,
+    s.sls_price,
+
+    -- Surrogate Keys from Dimensions
+    c.customer_key,
+    p.product_key,
+
+    -- Descriptive columns (for easy BI querying)
+    c.cst_firstname,
+    c.cst_lastname,
+    c.country,
+    p.prd_nm,
+    p.category_name,
+    p.subcategory_name,
+
+    -- Audit timestamp
+    s.dwh_create_date
+from {{ ref('crm_sales_details') }} s
+left join {{ ref('dim_customers') }} c on s.sls_cust_id = c.customer_id
+left join {{ ref('dim_products') }} p on s.sls_prd_key = p.sls_prd_key;
+```
+
+---
+
+## 5. dbt Project Structure & Tests
 
 ### A. Directory Structure
 ```text
 crm_dbt/
 ├── assets/
 │   ├── data_flow.png
-│   └── cleaned crm prod.png
+│   ├── cleaned crm prod.png
+│   └── gold_join_relation.png
 ├── crm_dbt_in/
-│   ├── analyses/
-│   ├── dbt_packages/
-│   ├── logs/
-│   ├── macros/
 │   ├── models/
 │   │   ├── bronze/
 │   │   │   └── sources.yml
@@ -289,78 +372,95 @@ crm_dbt/
 │   │   │   ├── silver_erp_px_cat_g1v2.sql
 │   │   │   └── silver_crm_sales_details.sql
 │   │   └── gold/
+│   │       ├── schema.yml
+│   │       ├── dim_customers.sql
+│   │       ├── dim_products.sql
 │   │       └── fct_sales.sql
-│   ├── seeds/
-│   ├── snapshots/
-│   ├── tests/
 │   ├── dbt_project.yml
 │   └── packages.yml
 └── README.md
 ```
 
-### B. Data Tests (`models/silver/schema.yml`)
+### B. Data Tests (`models/gold/schema.yml`)
+Implemented 12 automated tests to ensure industrial-grade data quality, all passing successfully (`PASS=12`).
 ```yaml
 version: 2
 
 models:
-  - name: silver_crm_cust_info
+  - name: dim_customers
+    description: "Customer dimension table merging CRM and ERP data"
     columns:
-      - name: cst_id
+      - name: customer_key
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
         tests:
           - unique
           - not_null
 
-  - name: silver_crm_sales_details
+  - name: dim_products
+    description: "Product dimension table merging CRM and ERP category data"
     columns:
-      - name: sls_quantity
+      - name: product_key
         tests:
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
+          - unique
+          - not_null
+      - name: prd_key
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_sales
+    description: "Sales fact table containing transactional data"
+    columns:
+      - name: sls_ord_num
+        tests:
+          - not_null
       - name: sls_sales
         tests:
           - not_null
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
-      - name: sls_price
+      - name: customer_key
         tests:
-          - not_null
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: product_key
+        tests:
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
 ```
 
 ---
 
-## 5. How to Run
+## 6. How to Run
 
 1. Install dbt packages:
    ```bash
    dbt deps
    ```
-2. Run the Silver models:
+2. Run all models (Silver and Gold):
    ```bash
-   dbt run --select silver
+   dbt run
    ```
-3. Run the data quality tests:
+3. Run data quality tests:
    ```bash
-   dbt test --select silver
-   ```
-4. Run the Gold models (once created):
-   ```bash
-   dbt run --select gold
+   dbt test
    ```
 
 ---
 
-## 6. Key Takeaways
-- **Always Profile First:** Use `TRIM` checks, `HAVING COUNT > 1`, and date-range checks to find anomalies before writing cleaning logic.
-- **dbt vs. Traditional SQL Server:** Unlike T-SQL where you manually write `CREATE TABLE` and `INSERT`, dbt uses a declarative `SELECT` approach. It automatically infers schemas, manages dependencies, and makes the code modular and version-controlled.
-- **OLAP vs. OLTP:** The source systems are OLTP (optimized for transactions), while our Databricks Medallion architecture is OLAP (optimized for analytics and aggregations).
-- **Deduplication:** Use `ROW_NUMBER()` partitioned by the primary key and ordered by timestamp.
+## 7. Key Takeaways
+
+- **Always Profile First:** Use `TRIM`, `HAVING COUNT > 1`, and date-range checks to find anomalies before writing cleaning logic.
 - **SCD2 Timeline Repair:** Use `LEAD()` and `DATE_SUB()` to dynamically fix overlapping dates while preserving historical data.
-- **Defensive Programming:** Use `NULLIF(column, 0)` when dividing to prevent fatal `Divide by Zero` errors. Handle extreme out-of-range dates (e.g., `9999-11-20`) by setting them to `NULL`.
-- **Audit Trails:** Always keep the `orig_` columns for future debugging and data lineage.
+- **Defensive Programming:** Use `NULLIF(column, 0)` to prevent `Divide by Zero` errors. Handle extreme out-of-range dates by setting them to `NULL`.
+- **Surrogate Keys in Star Schema:** Generated surrogate keys using `ROW_NUMBER()` in the Gold layer dimensions to decouple the data warehouse from source system business keys, ensuring stable and high-performance joins.
+- **Preventing Fan-out:** Filtered `dim_products` using `WHERE prd_end_dt IS NULL` to ensure the dimension table only exposes the current active version of each product, preventing duplicate sales records during the fact table join.
+- **Automated Data Quality:** Leveraged dbt's `relationships` test to enforce referential integrity between the fact and dimension tables, ensuring zero orphaned records.
 
 ---
 
-## 7. Reference
+## 8. Reference
 - **SQL Data Warehouse Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
