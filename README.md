@@ -386,7 +386,15 @@ crm_dbt/
 ### B. Data Tests & Validation Results (`models/gold/schema.yml`)
 Implemented **12 automated tests** to ensure industrial-grade data quality. All tests passed successfully (`PASS=12`).
 
-Furthermore, a rigorous **Fan-out (Data Explosion) Validation** was performed on the Gold layer. The row counts before and after joining the Fact table with the Dimension tables remained strictly identical, proving zero data duplication and 100% referential integrity.
+Furthermore, a rigorous **Fan-out (Data Explosion) Validation** was performed on the Gold layer to ensure zero data duplication and 100% referential integrity.
+
+**Validation SQL:**
+```sql
+SELECT 
+    (SELECT COUNT(*) FROM crm_dbt_dev.gold.fct_sales) AS original_fact_rows,
+    (SELECT COUNT(*) FROM crm_dbt_dev.gold.fct_sales f LEFT JOIN crm_dbt_dev.gold.dim_customers c ON f.customer_key = c.customer_key) AS after_customer_join,
+    (SELECT COUNT(*) FROM crm_dbt_dev.gold.fct_sales f LEFT JOIN crm_dbt_dev.gold.dim_products p ON f.product_key = p.product_key) AS after_product_join;
+```
 
 **Validation Results:**
 - **Original Fact Rows:** 60,398
@@ -397,6 +405,7 @@ This confirms that:
 1. **No Orphaned Records:** Every transaction has a valid customer and product.
 2. **No Fan-out:** The Surrogate Keys in the dimension tables are strictly unique, ensuring sales metrics are accurate and never double-counted.
 
+*(The following dbt tests enforce this integrity automatically on every run)*
 ```yaml
 version: 2
 
