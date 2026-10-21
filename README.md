@@ -73,8 +73,11 @@ WHERE sls_sales != sls_quantity * sls_price
 with
     source_data as (select * from {{ source('bronze_source', 'bronze_erp_cust_az12') }})
 select
+    -- Cleaning Strategy: String Manipulation (Remove 'NAS' prefix)
     case when cid like 'NAS%' then substring(cid, 4) else cid end as cid,
+    -- Cleaning Strategy: Business Rule (Filter out impossible birthdates)
     case when bdate < '1924-01-01' or bdate > current_date() then null else bdate end as bdate,
+    -- Cleaning Strategy: Standardization (Map abbreviations to full words)
     case 
         when upper(trim(gen)) in ('M', 'MALE') then 'Male'
         when upper(trim(gen)) in ('F', 'FEMALE') then 'Female'
@@ -91,6 +94,7 @@ with
     source_data as (select * from {{ source('bronze_source', 'bronze_crm_cust') }}),
     filtered_data as (select * from source_data where cst_id is not null),
     deduplicated as (
+        -- Cleaning Strategy: Deduplication (Keep the latest record per customer)
         select *, row_number() over (partition by cst_id order by cst_create_date desc) as rn
         from filtered_data
     )
@@ -120,7 +124,9 @@ where rn = 1;
 with
     source_data as (select * from {{ source('bronze_source', 'bronze_erp_loc_a101') }})
 select
+    -- Cleaning Strategy: String Manipulation (Remove hyphens)
     replace(trim(cid), '-', '') as cid,
+    -- Cleaning Strategy: Standardization (Unify country names)
     case 
         when upper(trim(cntry)) in ('US', 'USA', 'UNITED STATES') then 'United States'
         when upper(trim(cntry)) in ('DE', 'GERMANY') then 'Germany'
@@ -158,6 +164,7 @@ with
                 when 'T' then 'Touring'
                 else 'n/a'
             end as prd_line,
+            -- Cleaning Strategy: String Manipulation (Extract category ID and sales key)
             replace(substring(prd_key, 1, 5), '-', '_') as cat_id,
             substring(trim(prd_key), 7) as sls_prd_key,
             prd_start_dt as orig_start_dt,
@@ -171,6 +178,7 @@ with
             prd_id, prd_key, prd_nm, prd_cost, prd_line, cat_id, sls_prd_key,
             orig_start_dt, orig_end_dt, dwh_create_date,
             fixed_start_dt as prd_start_dt,
+            -- Cleaning Strategy: SCD Type 2 Timeline Repair (Use LEAD to fix overlaps)
             case
                 when lead(fixed_start_dt) over (partition by prd_key order by fixed_start_dt, prd_id) is not null
                 then date_sub(lead(fixed_start_dt) over (partition by prd_key order by fixed_start_dt, prd_id), 1)
@@ -211,9 +219,11 @@ with
             trim(sls_ord_num) as sls_ord_num,
             trim(sls_prd_key) as sls_prd_key,
             sls_cust_id,
+            -- Cleaning Strategy: Date parsing with length validation
             case when sls_order_dt = 0 or length(cast(sls_order_dt as string)) != 8 then null else to_date(cast(sls_order_dt as string), 'yyyyMMdd') end as sls_order_dt,
             case when sls_ship_dt = 0 or length(cast(sls_ship_dt as string)) != 8 then null else to_date(cast(sls_ship_dt as string), 'yyyyMMdd') end as sls_ship_dt,
             case when sls_due_dt = 0 or length(cast(sls_due_dt as string)) != 8 then null else to_date(cast(sls_due_dt as string), 'yyyyMMdd') end as sls_due_dt,
+            -- Cleaning Strategy: Business Rule (Recalculate invalid sales amounts)
             case
                 when sls_sales is null or sls_sales <= 0 or sls_sales != sls_quantity * abs(sls_price) 
                 then sls_quantity * abs(sls_price)
@@ -474,11 +484,17 @@ models:
 
 ---
 
-## 7. Key Takeaways
+## 7. Key Takeaways & Core Cleaning Strategies
 
-- **Always Profile First:** Use `TRIM`, `HAVING COUNT > 1`, and date-range checks to find anomalies before writing cleaning logic.
-- **SCD2 Timeline Repair:** Use `LEAD()` and `DATE_SUB()` to dynamically fix overlapping dates while preserving historical data.
-- **Defensive Programming:** Use `NULLIF(column, 0)` to prevent `Divide by Zero` errors. Handle extreme out-of-range dates by setting them to `NULL`.
+This project demonstrates four core enterprise data cleaning strategies used to transform raw, messy data into a reliable Star Schema:
+
+1. **Data Profiling & Duplicate Detection (`HAVING COUNT > 1`):** Before cleaning, data is profiled to identify duplicated primary keys and anomalies. In the Silver layer, deduplication is handled using `ROW_NUMBER()` to retain only the most recent record.
+2. **String Manipulation & Key Extraction (`REPLACE`, `SUBSTRING`):** Cross-system keys rarely match. We used `REPLACE` to strip prefixes (e.g., removing 'NAS' from ERP IDs) and `SUBSTRING` to extract specific business keys (e.g., splitting `prd_key` into `cat_id` and `sls_prd_key`).
+3. **Standardization (`CASE WHEN`):** Inconsistent categorical data (e.g., 'M' vs 'Male', 'US' vs 'USA') is standardized into unified, readable formats using `CASE WHEN` statements.
+4. **SCD Type 2 Timeline Repair (`LEAD` & `DATE_SUB`):** To fix overlapping historical product dates, window functions (`LEAD`) are used to dynamically set a record's end date to exactly 1 day before the next record's start date, ensuring a clean, gap-free timeline.
+5. **Defensive Programming:** Used `NULLIF(column, 0)` to prevent `Divide by Zero` errors. Handled extreme out-of-range dates (e.g., `9999-11-20`) by setting them to `NULL`.
+
+### 🏆 Enterprise Architecture Highlights:
 - **Surrogate Keys in Star Schema:** Generated surrogate keys using `ROW_NUMBER()` in the Gold layer dimensions to decouple the data warehouse from source system business keys, ensuring stable and high-performance joins.
 - **Preventing Fan-out:** Filtered `dim_products` using `WHERE prd_end_dt IS NULL` to ensure the dimension table only exposes the current active version of each product, preventing duplicate sales records during the fact table join.
 - **Automated Data Quality:** Leveraged dbt's `relationships` test to enforce referential integrity between the fact and dimension tables, ensuring zero orphaned records.
