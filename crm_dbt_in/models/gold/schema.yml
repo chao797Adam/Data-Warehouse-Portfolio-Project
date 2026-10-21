@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  # ==========================================
+  # Dimension: Customers
+  # ==========================================
+  - name: dim_customers
+    description: "Customer dimension table merging CRM and ERP data"
+    columns:
+      - name: customer_key
+        description: "Surrogate key for the customer"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Business key from CRM"
+        tests:
+          - unique
+          - not_null
+
+  # ==========================================
+  # Dimension: Products
+  # ==========================================
+  - name: dim_products
+    description: "Product dimension table merging CRM and ERP category data"
+    columns:
+      - name: product_key
+        description: "Surrogate key for the product"
+        tests:
+          - unique
+          - not_null
+      - name: prd_key
+        description: "Business key from CRM"
+        tests:
+          - unique
+          - not_null
+
+  # ==========================================
+  # Fact Table: Sales
+  # ==========================================
+  - name: fct_sales
+    description: "Sales fact table containing transactional data"
+    columns:
+      - name: sls_ord_num
+        description: "Order number"
+        tests:
+          - not_null
+      - name: sls_sales
+        description: "Total sales amount"
+        tests:
+          - not_null
+      - name: customer_key
+        description: "Foreign key to dim_customers"
+        tests:
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: product_key
+        description: "Foreign key to dim_products"
+        tests:
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
