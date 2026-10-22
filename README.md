@@ -481,9 +481,7 @@ models:
    ```bash
    dbt test
    ```
-
 ---
-
 ## 7. Key Takeaways & Core Cleaning Strategies
 
 This project demonstrates four core enterprise data cleaning strategies used to transform raw, messy data into a reliable Star Schema:
@@ -498,9 +496,7 @@ This project demonstrates four core enterprise data cleaning strategies used to 
 - **Surrogate Keys in Star Schema:** Generated surrogate keys using `ROW_NUMBER()` in the Gold layer dimensions to decouple the data warehouse from source system business keys, ensuring stable and high-performance joins.
 - **Preventing Fan-out:** Filtered `dim_products` using `WHERE prd_end_dt IS NULL` to ensure the dimension table only exposes the current active version of each product, preventing duplicate sales records during the fact table join.
 - **Automated Data Quality:** Leveraged dbt's `relationships` test to enforce referential integrity between the fact and dimension tables, ensuring zero orphaned records.
-
 ---
-
 ## 8. Business Value & Ad-hoc Analysis
 
 To demonstrate that the Gold layer is not just a technical artifact but a business-ready asset, the following **Ad-hoc Analysis** was performed. It aggregates all key business metrics into a single, unpivoted report format—a common requirement for executive dashboards and BI tools (e.g., Power BI, Tableau).
@@ -540,5 +536,6 @@ FROM crm_dbt_dev.gold.dim_customers;
 - **`COUNT(DISTINCT ...)` for Accuracy:** Using `DISTINCT` is critical here. Because the fact table grain is at the line-item level (one order can have multiple items), a simple `COUNT()` would overcount the total number of unique orders, products, and customers.
 - **Business Insight:** This output directly answers the C-level questions: *"How much did we sell?"*, *"How many orders were placed?"*, and *"How large is our active customer and product base?"*
 
+---
 ## Reference
 - **SQL Data Warehouse Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
