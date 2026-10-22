@@ -501,5 +501,44 @@ This project demonstrates four core enterprise data cleaning strategies used to 
 
 ---
 
-## 8. Reference
+## 8. Business Value & Ad-hoc Analysis
+
+To demonstrate that the Gold layer is not just a technical artifact but a business-ready asset, the following **Ad-hoc Analysis** was performed. It aggregates all key business metrics into a single, unpivoted report format—a common requirement for executive dashboards and BI tools (e.g., Power BI, Tableau).
+
+### 📊 Executive KPI Summary Query
+
+This query uses `UNION ALL` to pivot multiple business metrics into a clean `measure_name` / `measure_value` format. 
+
+```sql
+-- Generate a Report that shows all key metrics of the business
+SELECT 'Total Sales' AS measure_name, SUM(sls_sales) AS measure_value 
+FROM crm_dbt_dev.gold.fct_sales
+
+UNION ALL
+SELECT 'Total Quantity', SUM(sls_quantity) 
+FROM crm_dbt_dev.gold.fct_sales
+
+UNION ALL
+SELECT 'Average Price', ROUND(AVG(sls_price), 2) 
+FROM crm_dbt_dev.gold.fct_sales
+
+UNION ALL
+SELECT 'Total Nr. Orders', COUNT(DISTINCT sls_ord_num) 
+FROM crm_dbt_dev.gold.fct_sales
+
+UNION ALL
+SELECT 'Total Nr. Products', COUNT(DISTINCT product_key) 
+FROM crm_dbt_dev.gold.dim_products
+
+UNION ALL
+SELECT 'Total Nr. Customers', COUNT(DISTINCT customer_key) 
+FROM crm_dbt_dev.gold.dim_customers;
+```
+
+### 💡 Key Engineering Highlights:
+- **`UNION ALL` for Performance:** `UNION ALL` is used instead of `UNION` to avoid expensive deduplication operations, as the metric names are inherently unique.
+- **`COUNT(DISTINCT ...)` for Accuracy:** Using `DISTINCT` is critical here. Because the fact table grain is at the line-item level (one order can have multiple items), a simple `COUNT()` would overcount the total number of unique orders, products, and customers.
+- **Business Insight:** This output directly answers the C-level questions: *"How much did we sell?"*, *"How many orders were placed?"*, and *"How large is our active customer and product base?"*
+
+## Reference
 - **SQL Data Warehouse Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
