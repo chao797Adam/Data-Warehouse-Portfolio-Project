@@ -546,11 +546,10 @@ This project demonstrates several core enterprise data cleaning and architectura
 
 ## 8. Business Value & Ad-hoc Analysis
 
-To demonstrate that the Gold layer is not just a technical artifact but a business-ready asset, the following **Ad-hoc Analysis** was performed. It aggregates all key business metrics into a single, unpivoted report format—a common requirement for executive dashboards and BI tools.
+To demonstrate that the Gold layer is not just a technical artifact but a business-ready asset, the following **Ad-hoc Analyses** were performed. Note how the clean fact table (containing only Surrogate Keys and Metrics) is seamlessly joined with dimension tables to answer specific business questions.
 
-### 📊 Executive KPI Summary Query
-
-This query uses `UNION ALL` to pivot multiple business metrics into a clean `measure_name` / `measure_value` format. 
+### 📊 1. Executive KPI Summary
+This query uses `UNION ALL` to pivot multiple business metrics into a single, unpivoted report format—a common requirement for executive dashboards.
 
 ```sql
 -- Generate a Report that shows all key metrics of the business
@@ -578,9 +577,45 @@ SELECT 'Total Nr. Customers', COUNT(DISTINCT customer_key)
 FROM crm_dbt_dev.gold.dim_customers;
 ```
 
-### 📈 Sales Analysis via Star Schema Join
+### 🏆 2. Top 5 Products by Revenue
+**Business Question:** *Which products are generating the most revenue?*
+
 ```sql
--- Business Question: Which country has the highest sales volume?
+SELECT 
+    dp.prd_nm, 
+    SUM(fs.sls_sales) AS total_revenue
+FROM crm_dbt_dev.gold.fct_sales fs
+LEFT JOIN crm_dbt_dev.gold.dim_products dp
+    ON fs.product_key = dp.product_key
+GROUP BY dp.prd_nm
+ORDER BY total_revenue DESC
+LIMIT 5;
+```
+
+### 👑 3. Top 10 Customers by Lifetime Value (LTV)
+**Business Question:** *Who are our most valuable customers, and how much have they contributed to our revenue?*
+
+```sql
+SELECT 
+    c.customer_id, 
+    c.cst_firstname, 
+    c.cst_lastname, 
+    SUM(fs.sls_sales) AS total_lifetime_value
+FROM crm_dbt_dev.gold.fct_sales fs
+LEFT JOIN crm_dbt_dev.gold.dim_customers c
+    ON fs.customer_key = c.customer_key
+GROUP BY 
+    c.customer_id, 
+    c.cst_firstname, 
+    c.cst_lastname
+ORDER BY total_lifetime_value DESC
+LIMIT 10;
+```
+
+### 🌍 4. Sales Volume by Country
+**Business Question:** *Which countries are driving the highest sales volume?*
+
+```sql
 SELECT 
     dc.country, 
     SUM(fs.sls_quantity) AS total_quantity
@@ -590,6 +625,35 @@ LEFT JOIN crm_dbt_dev.gold.dim_customers dc
 GROUP BY dc.country
 ORDER BY total_quantity DESC;
 ```
+
+### 📉 5. Customers with the Fewest Orders (Churn Risk)
+**Business Question:** *Which customers have placed the fewest orders?*
+
+While finding the highest-value customers is crucial for retention, identifying customers with very low order frequencies is equally important for **re-engagement and churn-prevention campaigns**. 
+
+```sql
+SELECT 
+    c.customer_id, 
+    c.cst_firstname, 
+    c.cst_lastname, 
+    COUNT(DISTINCT fs.sls_ord_num) AS total_orders
+FROM crm_dbt_dev.gold.fct_sales fs
+LEFT JOIN crm_dbt_dev.gold.dim_customers c
+    ON fs.customer_key = c.customer_key
+WHERE fs.sls_ord_num IS NOT NULL -- Exclude customers with zero valid transactions
+GROUP BY 
+    c.customer_id, 
+    c.cst_firstname, 
+    c.cst_lastname
+ORDER BY total_orders ASC -- From fewest to most
+LIMIT 10;
+```
+
+### 💡 Engineering & Business Value Notes:
+- **Demonstrating the Star Schema:** All descriptive analyses above (`prd_nm`, `country`, `cst_firstname`) require joining the clean fact table with dimension tables. This proves the architectural decision to exclude redundant attributes from `fct_sales` was correct—it forces a Single Source of Truth (SSoT) and prevents data inconsistency.
+- **`LIMIT` vs. `RANK()`:** For dashboarding, `ORDER BY ... LIMIT N` is the most efficient way to get top results. However, in production scenarios where ties at the Nth position matter (e.g., awarding bonuses), using window functions like `RANK() OVER (ORDER BY total_revenue DESC) <= 5` is more business-accurate, as it includes all tied records.
+- **Handling Orphaned Records & Churn Risk:** Because we use `LEFT JOIN`, any transaction without a matching dimension record will result in a `NULL` grouping. For churn risk analysis, sorting ascending (`ASC`) helps the marketing team identify low-frequency buyers for re-engagement campaigns.
+- **SQL Best Practice:** While `GROUP BY 1, 2, 3` is valid, production-level dbt models should use explicit column names to prevent bugs if the `SELECT` order changes. 
 
 ---
 
