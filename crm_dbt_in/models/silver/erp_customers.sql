@@ -11,9 +11,7 @@ select
     -- Remove 'NAS' prefix
     case when cid like 'NAS%' then substring(cid, 4) else cid end as cid,
 
-    case
-        when bdate < '1924-01-01' or bdate > current_date() then null else bdate
-    end as bdate,
+    case when bdate > current_date() then null else bdate end as bdate,
 
     -- Standardize gender
     case
