@@ -980,6 +980,7 @@ WITH customer_orders AS (
     SELECT 
         c.customer_key,
         c.cst_firstname || ' ' || c.cst_lastname AS customer_name,
+        c.birthdate,
         COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
         SUM(fs.sls_sales) AS total_sales,
         SUM(fs.sls_quantity) AS total_quantity,
@@ -989,26 +990,40 @@ WITH customer_orders AS (
     FROM crm_dbt_dev.gold.fct_sales fs
     LEFT JOIN crm_dbt_dev.gold.dim_customers c 
         ON fs.customer_key = c.customer_key
-    GROUP BY c.customer_key, customer_name
+    GROUP BY c.customer_key, customer_name, c.birthdate
 ),
 customer_kpis AS (
-    -- Layer 2: Derived KPIs and Segmentation
+    -- Layer 2: Derived KPIs, Segmentation, and Age Groups
     SELECT 
         *,
         ROUND(total_sales / NULLIF(total_orders, 0), 2) AS avg_order_value,
         ROUND(total_sales / NULLIF(lifespan_months, 0), 2) AS avg_monthly_spend,
         DATEDIFF(month, last_purchase, current_date()) AS recency_months,
+        
+        -- 1. Customer Value Segment
         CASE 
             WHEN lifespan_months IS NULL THEN 'Unknown'
             WHEN lifespan_months >= 12 AND total_sales > 5000 THEN 'VIP'
             WHEN lifespan_months >= 12 AND total_sales <= 5000 THEN 'Regular'
             ELSE 'New' 
-        END AS customer_segment
+        END AS customer_segment,
+        
+        -- 2. Age Group Segmentation (Using DATEDIFF on birthdate)
+        CASE 
+            WHEN birthdate IS NULL THEN 'Unknown Age'
+            WHEN DATEDIFF(year, birthdate, current_date()) < 25 THEN 'Under 25'
+            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 25 AND 34 THEN '25-34'
+            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 35 AND 44 THEN '35-44'
+            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 45 AND 54 THEN '45-54'
+            ELSE '55+' 
+        END AS age_group
+        
     FROM customer_orders
 )
 -- Final output: A unified Customer 360 view
 SELECT 
     customer_segment,
+    age_group, -- Added Age Group
     customer_name,
     total_orders,
     total_sales,
