@@ -852,6 +852,44 @@ ORDER BY prd_nm, order_year ASC;
 - **Explicit Edge Case Handling:** The first year of a product's lifecycle (`prev_year_sales IS NULL`) is explicitly flagged as `'No Baseline'` rather than `'No Change'`. This preserves the semantic difference between "unknown year-over-year performance" and "zero year-over-year growth". 
 - **BI Flexibility:** By outputting `avg_change_flag` and `py_change_flag` as separate columns, analysts can dynamically slice the data (e.g., filtering for products that are `Above Avg` but marked as `Decrease`), which identifies "decaying winners" early.
 
+***
+
+### 📊 11. Part-to-Whole Analysis (Category Contribution)
+**Business Question:** *Which product categories contribute the most to our total revenue, and what is their percentage share?*
+
+This query calculates the revenue share of each product category. It uses a window function without a `PARTITION BY` clause (`SUM() OVER ()`) to compute the grand total across all categories, allowing us to calculate the percentage contribution seamlessly.
+
+```sql
+WITH category_sales AS (
+    SELECT 
+        dp.category_name,
+        SUM(fs.sls_sales) AS category_revenue
+    FROM crm_dbt_dev.gold.fct_sales fs
+    LEFT JOIN crm_dbt_dev.gold.dim_products dp 
+        ON fs.product_key = dp.product_key
+    WHERE fs.sls_order_dt IS NOT NULL
+    GROUP BY dp.category_name
+),
+total_sales_cte AS (
+    SELECT 
+        *,
+        -- Calculate grand total across all rows
+        SUM(category_revenue) OVER () AS total_revenue
+    FROM category_sales
+)
+SELECT 
+    category_name,
+    category_revenue,
+    total_revenue,
+    ROUND(category_revenue / total_revenue * 100.0, 2) AS revenue_percentage
+FROM total_sales_cte
+ORDER BY category_revenue DESC;
+```
+
+**💡 Engineering & Business Value Notes:**
+- **The Power of `OVER ()`:** By using `SUM(category_revenue) OVER ()` without a `PARTITION BY`, we calculate the grand total for all categories. This is far more performant and readable than using a self-join or a Cartesian product (`CROSS JOIN`) to get the total.
+- **Business Insight (Pareto Principle):** This analysis is the first step in identifying the Pareto Principle (the 80/20 rule). If the output shows that 2 out of 10 categories account for 80% of total revenue, the business should prioritize inventory and marketing budgets for those top categories while reviewing the bottom categories for potential phase-out.
+
 ---
 
 ## 9. Reference
