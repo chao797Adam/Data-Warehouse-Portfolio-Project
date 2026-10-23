@@ -967,9 +967,67 @@ ORDER BY customer_count DESC;
 - **Static vs. Dynamic Segmentation:** The product cost segmentation is a static dimension analysis (ideal for inventory management). The customer segmentation is a dynamic fact-based analysis (ideal for CRM and marketing campaigns).
 - **Data Quality Alert (The `Unknown` Segment):** The customer segmentation output contains a tiny `Unknown` segment. This is an intentional engineering choice. These customers have missing order dates in the source, so their lifespan cannot be calculated. Instead of silently dropping their revenue, we flag them as `Unknown` to preserve financial integrity and flag upstream data quality issues.
 
+### 👑 13. Final Comprehensive Customer Report (Customer 360 View)
+**Business Question:** *How can we consolidate all key customer metrics and behaviors into a single, analytics-ready view for the marketing and CRM teams?*
+
+In real-world enterprise data stacks, stakeholders often require a **"Customer 360"** view—a One Big Table (OBT) that consolidates all foundational metrics, derived KPIs, and segmentation flags into a single grain (one row per customer). This eliminates the need for downstream analysts to repeatedly write complex `JOIN` and `GROUP BY` logic.
+
+To achieve this efficiently, we use a multi-layered CTE approach: first aggregating base metrics, then calculating derived KPIs and segments.
+
+```sql
+WITH customer_orders AS (
+    -- Layer 1: Base metrics at the customer grain
+    SELECT 
+        c.customer_key,
+        c.cst_firstname || ' ' || c.cst_lastname AS customer_name,
+        COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
+        SUM(fs.sls_sales) AS total_sales,
+        SUM(fs.sls_quantity) AS total_quantity,
+        MIN(fs.sls_order_dt) AS first_purchase,
+        MAX(fs.sls_order_dt) AS last_purchase,
+        DATEDIFF(month, MIN(fs.sls_order_dt), MAX(fs.sls_order_dt)) AS lifespan_months
+    FROM crm_dbt_dev.gold.fct_sales fs
+    LEFT JOIN crm_dbt_dev.gold.dim_customers c 
+        ON fs.customer_key = c.customer_key
+    GROUP BY c.customer_key, customer_name
+),
+customer_kpis AS (
+    -- Layer 2: Derived KPIs and Segmentation
+    SELECT 
+        *,
+        ROUND(total_sales / NULLIF(total_orders, 0), 2) AS avg_order_value,
+        ROUND(total_sales / NULLIF(lifespan_months, 0), 2) AS avg_monthly_spend,
+        DATEDIFF(month, last_purchase, current_date()) AS recency_months,
+        CASE 
+            WHEN lifespan_months IS NULL THEN 'Unknown'
+            WHEN lifespan_months >= 12 AND total_sales > 5000 THEN 'VIP'
+            WHEN lifespan_months >= 12 AND total_sales <= 5000 THEN 'Regular'
+            ELSE 'New' 
+        END AS customer_segment
+    FROM customer_orders
+)
+-- Final output: A unified Customer 360 view
+SELECT 
+    customer_segment,
+    customer_name,
+    total_orders,
+    total_sales,
+    avg_order_value,
+    avg_monthly_spend,
+    recency_months,
+    lifespan_months
+FROM customer_kpis
+ORDER BY total_sales DESC;
+```
+
+**💡 Engineering & Business Value Notes:**
+- **Layered CTE Architecture:** Calculating 8+ metrics with conditional logic in a single `SELECT` is error-prone and unreadable. This query uses **two distinct CTE layers**: Layer 1 handles the raw aggregation, and Layer 2 calculates the derived ratios (`avg_order_value`, `avg_monthly_spend`) and the `CASE WHEN` segmentation. This guarantees high maintainability.
+- **Defensive Programming (`NULLIF`):** When calculating `avg_order_value` and `avg_monthly_spend`, we use `NULLIF(denominator, 0)` to prevent fatal `Divide by Zero` errors for edge-case customers.
+- **Business Value (The 360 View):** This final output serves as the ultimate "Customer 360" asset. The CRM team can directly query this table to execute highly targeted campaigns (e.g., targeting `VIP` customers with low `recency_months`, or `Regular` customers with high `avg_monthly_spend` to upsell them to VIP status).
+
 ---
 
-## 9. Reference
+## Reference
 - **SQL Data Analyst Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
 - **Specific Video Referenced in Note:** [Video #12 - Moving Average Discussion (~22:00)](https://www.youtube.com/watch?v=2jGhQpbzHes&list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8&index=12)
 
