@@ -986,6 +986,8 @@ WITH customer_orders AS (
         COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
         SUM(fs.sls_sales) AS total_sales,
         SUM(fs.sls_quantity) AS total_quantity,
+         -- Count how many unique products this customer has bought
+        COUNT(DISTINCT fs.product_key) AS total_products,
         MIN(fs.sls_order_dt) AS first_purchase,
         MAX(fs.sls_order_dt) AS last_purchase,
         DATEDIFF(month, MIN(fs.sls_order_dt), MAX(fs.sls_order_dt)) AS lifespan_months
@@ -1029,6 +1031,8 @@ SELECT
     customer_name,
     total_orders,
     total_sales,
+    total_quantity,
+    total_products, -- Added here
     avg_order_value,
     avg_monthly_spend,
     recency_months,
