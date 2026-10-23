@@ -1014,14 +1014,14 @@ customer_kpis AS (
             ELSE 'New' 
         END AS customer_segment,
         
-        -- 2. Age Group Segmentation
+        -- 2. Age Group Segmentation (Using the pre-calculated age)
         CASE 
             WHEN birthdate IS NULL THEN 'Unknown Age'
-            WHEN age < 25 THEN 'Under 25'
-            WHEN age BETWEEN 25 AND 34 THEN '25-34'
-            WHEN age BETWEEN 35 AND 44 THEN '35-44'
-            WHEN age BETWEEN 45 AND 54 THEN '45-54'
-            ELSE '55+' 
+            WHEN age < 20 THEN 'Under 20'
+            WHEN age BETWEEN 20 AND 29 THEN '20-29'
+            WHEN age BETWEEN 30 AND 39 THEN '30-39'
+            WHEN age BETWEEN 40 AND 49 THEN '40-49'
+            ELSE '50 and above' 
         END AS age_group
         
     FROM customer_orders
@@ -1032,6 +1032,7 @@ SELECT
     cst_key,
     customer_name,
     customer_segment,
+    age,
     age_group,
     total_orders,
     total_sales,
