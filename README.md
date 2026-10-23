@@ -1028,7 +1028,7 @@ customer_kpis AS (
 )
 -- Final output: A unified Customer 360 view
 SELECT 
-customer_key,
+    customer_key,
     cst_key,
     customer_name,
     customer_segment,
