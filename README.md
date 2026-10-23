@@ -784,7 +784,18 @@ ORDER BY order_month ASC;
 - **Granularity Alignment:** The `GROUP BY` establishes the month-level grain, and the `OVER (ORDER BY order_month)` perfectly mirrors it. This guarantees the running total increments smoothly without skipping months.
 - **Operational Focus:** The monthly cumulative chart provides a high-resolution timeline. It allows operations teams to pinpoint the exact months in 2013 where the business shifted from linear growth to exponential growth, making it easier to tie specific marketing campaigns or product launches to revenue spikes.
 
+### 💡 Engineering Note: The "Weighting Trap" in Moving Averages
+
+While exploring different analytical approaches, I identified a critical mathematical flaw in a common tutorial pattern (seen in the reference tutorial at [Video #12, ~22:00](https://www.youtube.com/watch?v=2jGhQpbzHes&list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8&index=12)): calculating a "moving average" using `AVG(AVG(price)) OVER (ORDER BY year)`. 
+
+- **The Flaw (Average of Averages):** This approach calculates the unweighted average of yearly average prices. If Year 1 sells 1 luxury item for $500,000, and Year 2 sells 10,000 economy items for $50,000, this formula yields **$275,000**. It completely ignores the sales volume, severely distorting the business reality.
+- **The Correct Approach (Weighted Moving Average):** A true moving average must be volume-weighted. It requires calculating `SUM(total_revenue) / SUM(total_quantity)` over a sliding window (e.g., `ROWS BETWEEN 2 PRECEDING AND CURRENT ROW`). This yields a statistically sound result of **~$54,900**, reflecting true customer behavior.
+
+By identifying and correcting this "average of averages" trap, I ensured that all business KPIs in this project remain statistically sound and volume-weighted.
+
 ---
 
 ## 9. Reference
-- **SQL Data Warehouse Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
+- **SQL Data Analyst Portfolio Project:** [YouTube Playlist](https://www.youtube.com/playlist?list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8)
+- **Specific Video Referenced in Note:** [Video #12 - Moving Average Discussion (~22:00)](https://www.youtube.com/watch?v=2jGhQpbzHes&list=PLNcg_FV9n7qaUWeyUkPfiVtMbKlrfMqA8&index=12)
+
