@@ -890,6 +890,83 @@ ORDER BY category_revenue DESC;
 - **The Power of `OVER ()`:** By using `SUM(category_revenue) OVER ()` without a `PARTITION BY`, we calculate the grand total for all categories. This is far more performant and readable than using a self-join or a Cartesian product (`CROSS JOIN`) to get the total.
 - **Business Insight (Pareto Principle):** This analysis is the first step in identifying the Pareto Principle (the 80/20 rule). If the output shows that 2 out of 10 categories account for 80% of total revenue, the business should prioritize inventory and marketing budgets for those top categories while reviewing the bottom categories for potential phase-out.
 
+### 🎯 12. Data Segmentation
+**Business Question:** *How can we segment our data into meaningful, actionable business tiers?*
+
+Data segmentation is a core strategy for both product management and marketing. Below are two distinct segmentation approaches: one based on the **product catalog (static)** and one based on **customer behavior (dynamic)**.
+
+#### 12.1 Product Cost Tier Segmentation (Static Dimension)
+This query segments the entire product catalog into cost tiers (`Below 100`, `100-500`, `501-1000`, `Above 1000`). It helps the supply chain team understand the product mix and manage inventory risk.
+
+```sql
+WITH segmented_products AS (
+    SELECT 
+        product_key,
+        CASE 
+            WHEN prd_cost < 100 THEN 'Below 100'
+            WHEN prd_cost BETWEEN 100 AND 500 THEN '100-500'
+            WHEN prd_cost BETWEEN 501 AND 1000 THEN '501-1000'
+            ELSE 'Above 1000'
+        END AS cost_range
+    FROM crm_dbt_dev.gold.dim_products
+)
+SELECT 
+    cost_range,
+    COUNT(product_key) AS total_products
+FROM segmented_products
+GROUP BY cost_range
+ORDER BY 
+    CASE cost_range 
+        WHEN 'Below 100' THEN 1
+        WHEN '100-500' THEN 2
+        WHEN '501-1000' THEN 3
+        ELSE 4 
+    END;
+```
+
+#### 12.2 Customer Behavior Segmentation (Dynamic Fact)
+This query segments customers into `VIP`, `Regular`, and `New` based on their **lifespan** (in months) and **total spending**. 
+
+> **⚠️ Engineering Note:** We use `DATEDIFF(month, MIN(date), MAX(date))` to calculate the true lifespan, rather than `COUNT(DISTINCT month)`. Counting active months fails to account for customers who have been registered for years but only purchased sporadically.
+
+```sql
+WITH cte_range AS (
+    SELECT 
+        c.customer_key, 
+        c.cst_firstname, 
+        c.cst_lastname,
+        SUM(fs.sls_sales) AS total_sales,
+        -- Calculate the true lifespan in months
+        DATEDIFF(month, MIN(fs.sls_order_dt), MAX(fs.sls_order_dt)) AS lifespan_months
+    FROM crm_dbt_dev.gold.fct_sales fs
+    LEFT JOIN crm_dbt_dev.gold.dim_customers c
+        ON fs.customer_key = c.customer_key
+    GROUP BY c.customer_key, c.cst_firstname, c.cst_lastname
+),
+cte_segment AS (
+    SELECT 
+        *, 
+        CASE 
+            -- Handle NULL lifespans caused by missing order dates
+            WHEN lifespan_months IS NULL THEN 'Unknown'
+            WHEN lifespan_months >= 12 AND total_sales > 5000 THEN 'VIP'
+            WHEN lifespan_months >= 12 AND total_sales <= 5000 THEN 'Regular'
+            ELSE 'New' 
+        END AS customer_segment
+    FROM cte_range
+)
+SELECT 
+    customer_segment,
+    COUNT(customer_key) AS customer_count
+FROM cte_segment
+GROUP BY customer_segment
+ORDER BY customer_count DESC;
+```
+
+**💡 Engineering & Business Value Notes:**
+- **Static vs. Dynamic Segmentation:** The product cost segmentation is a static dimension analysis (ideal for inventory management). The customer segmentation is a dynamic fact-based analysis (ideal for CRM and marketing campaigns).
+- **Data Quality Alert (The `Unknown` Segment):** The customer segmentation output contains a tiny `Unknown` segment. This is an intentional engineering choice. These customers have missing order dates in the source, so their lifespan cannot be calculated. Instead of silently dropping their revenue, we flag them as `Unknown` to preserve financial integrity and flag upstream data quality issues.
+
 ---
 
 ## 9. Reference
