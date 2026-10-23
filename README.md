@@ -1060,6 +1060,78 @@ ORDER BY total_sales DESC;
     1.  **The `AOV` Denominator Trap:** A common tutorial anti-pattern is `CASE WHEN total_sales = 0 THEN 0 ELSE total_sales / total_orders`. This is mathematically flawed because it checks the numerator (`total_sales`) instead of the actual divisor (`total_orders`). If an order count is 0, it will crash. Furthermore, returning `0` distorts averages. My solution uses `NULLIF(total_orders, 0)` to return `NULL` (undefined), which is statistically correct.
     2.  **The Monthly Spend Distortion:** The tutorial uses `CASE WHEN lifespan = 0 THEN total_sales ELSE total_sales / lifespan`. This is a severe business logic error. If a customer's lifespan is 0 (only bought once), it incorrectly assumes their total sales amount is their *monthly* spend. My implementation uses `NULLIF(lifespan_months, 0)` to return `NULL`, preventing the inflation of monthly spending metrics for one-time buyers.
 
+
+### 📦 14. Final Product Report (Product 360 View)
+**Business Question:** *How can we consolidate all key product metrics and segment them into High, Mid, and Low performers to guide supply chain decisions?*
+
+While the Customer 360 focuses on who is buying, the **Product 360** focuses on what is being sold. This view consolidates sales volume, revenue, customer reach, and **performance segmentation** at the product grain (one row per product).
+
+```sql
+{{ config(materialized='table', schema='gold') }}
+
+WITH product_sales_metrics AS (
+    -- Layer 1: Base metrics at the product grain
+    SELECT 
+        p.product_key,
+        p.prd_nm AS product_name,
+        p.category_name,
+        p.subcategory_name,
+        -- Time metrics
+        MIN(fs.sls_order_dt) AS first_sale_date,
+        MAX(fs.sls_order_dt) AS last_sale_date,
+        DATEDIFF(month, MIN(fs.sls_order_dt), MAX(fs.sls_order_dt)) AS lifespan_months,
+        -- Volume and Reach metrics
+        COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
+        COUNT(DISTINCT fs.customer_key) AS total_customers,
+        SUM(fs.sls_sales) AS total_sales,
+        SUM(fs.sls_quantity) AS total_quantity
+    FROM {{ ref('fct_sales') }} fs
+    LEFT JOIN {{ ref('dim_products') }} p 
+        ON fs.product_key = p.product_key
+    GROUP BY 
+        p.product_key, p.prd_nm, p.category_name, p.subcategory_name
+),
+product_kpis AS (
+    -- Layer 2: Derived KPIs and Performance Segmentation
+    SELECT 
+        *,
+        -- Calculate weighted average selling price (Total Sales / Total Quantity)
+        -- This is more statistically accurate than AVG(price per row)
+        ROUND(total_sales / NULLIF(total_quantity, 0), 2) AS avg_selling_price,
+        
+        -- Product Performance Segmentation based on Revenue
+        CASE 
+            WHEN total_sales > 50000 THEN 'High-Performer'
+            WHEN total_sales >= 10000 THEN 'Mid-Range'
+            ELSE 'Low-Performer'
+        END AS product_segment
+        
+    FROM product_sales_metrics
+)
+-- Final output: A unified Product 360 view
+SELECT 
+    product_key,
+    product_name,
+    category_name,
+    subcategory_name,
+    product_segment,
+    first_sale_date,
+    last_sale_date,
+    lifespan_months,
+    total_orders,
+    total_customers,
+    total_sales,
+    total_quantity,
+    avg_selling_price
+FROM product_kpis
+ORDER BY total_sales DESC;
+```
+
+**💡 Engineering & Business Value Notes:**
+- **Weighted Average Pricing (The Correct Approach):** The reference tutorial calculates average price using `AVG(sales / quantity)`, which averages the unit prices of each row. This is statistically flawed because a row with 1 item and a row with 100 items carry the same weight. I used `total_sales / total_quantity` to calculate the **true weighted average selling price**, which is financially accurate.
+- **Safe Division (`NULLIF`):** We use `NULLIF(total_quantity, 0)` to prevent `Divide by Zero` errors if a product somehow has zero quantity sold.
+- **Product Segmentation:** By using `CASE WHEN` on `total_sales`, we categorize products into `High-Performer`, `Mid-Range`, and `Low-Performer`. This empowers category managers to quickly identify which products to promote and which to phase out.
+
 ---
 
 ## Reference
