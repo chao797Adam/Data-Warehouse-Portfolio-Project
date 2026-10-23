@@ -981,6 +981,8 @@ WITH customer_orders AS (
         c.customer_key,
         c.cst_firstname || ' ' || c.cst_lastname AS customer_name,
         c.birthdate,
+        -- Calculate age exactly once at the lowest grain
+        DATEDIFF(year, c.birthdate, current_date()) AS age, 
         COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
         SUM(fs.sls_sales) AS total_sales,
         SUM(fs.sls_quantity) AS total_quantity,
@@ -1008,13 +1010,13 @@ customer_kpis AS (
             ELSE 'New' 
         END AS customer_segment,
         
-        -- 2. Age Group Segmentation (Using DATEDIFF on birthdate)
+        -- 2. Age Group Segmentation (Using the pre-calculated age)
         CASE 
             WHEN birthdate IS NULL THEN 'Unknown Age'
-            WHEN DATEDIFF(year, birthdate, current_date()) < 25 THEN 'Under 25'
-            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 25 AND 34 THEN '25-34'
-            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 35 AND 44 THEN '35-44'
-            WHEN DATEDIFF(year, birthdate, current_date()) BETWEEN 45 AND 54 THEN '45-54'
+            WHEN age < 25 THEN 'Under 25'
+            WHEN age BETWEEN 25 AND 34 THEN '25-34'
+            WHEN age BETWEEN 35 AND 44 THEN '35-44'
+            WHEN age BETWEEN 45 AND 54 THEN '45-54'
             ELSE '55+' 
         END AS age_group
         
@@ -1023,7 +1025,7 @@ customer_kpis AS (
 -- Final output: A unified Customer 360 view
 SELECT 
     customer_segment,
-    age_group, -- Added Age Group
+    age_group,
     customer_name,
     total_orders,
     total_sales,
