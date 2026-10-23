@@ -827,9 +827,10 @@ SELECT
     -- 3. Deviation from Average
     ROUND(current_year_sales - AVG(current_year_sales) OVER (PARTITION BY prd_nm), 2) AS avg_sales_deviation,
     -- 4. Performance Flag
-    CASE 
-        WHEN current_year_sales > AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Above Average'
-        ELSE 'Below Average'
+        CASE 
+        WHEN current_year_sales > AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Above Avg'
+        WHEN current_year_sales < AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Below Avg'
+        ELSE 'Avg'
     END AS performance_flag
 FROM product_yearly_sales
 ORDER BY prd_nm, order_year;
