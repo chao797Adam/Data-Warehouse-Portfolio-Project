@@ -975,10 +975,12 @@ In real-world enterprise data stacks, stakeholders often require a **"Customer 3
 To achieve this efficiently, we use a multi-layered CTE approach: first aggregating base metrics, then calculating derived KPIs and segments.
 
 ```sql
+%sql
 WITH customer_orders AS (
     -- Layer 1: Base metrics at the customer grain
     SELECT 
         c.customer_key,
+        c.cst_key,
         c.cst_firstname || ' ' || c.cst_lastname AS customer_name,
         c.birthdate,
         -- Calculate age exactly once at the lowest grain
@@ -986,7 +988,7 @@ WITH customer_orders AS (
         COUNT(DISTINCT fs.sls_ord_num) AS total_orders,
         SUM(fs.sls_sales) AS total_sales,
         SUM(fs.sls_quantity) AS total_quantity,
-         -- Count how many unique products this customer has bought
+        -- Count how many unique products this customer has bought
         COUNT(DISTINCT fs.product_key) AS total_products,
         MIN(fs.sls_order_dt) AS first_purchase,
         MAX(fs.sls_order_dt) AS last_purchase,
@@ -994,7 +996,7 @@ WITH customer_orders AS (
     FROM crm_dbt_dev.gold.fct_sales fs
     LEFT JOIN crm_dbt_dev.gold.dim_customers c 
         ON fs.customer_key = c.customer_key
-    GROUP BY c.customer_key, customer_name, c.birthdate
+    GROUP BY c.customer_key, c.cst_key, customer_name, c.birthdate
 ),
 customer_kpis AS (
     -- Layer 2: Derived KPIs, Segmentation, and Age Groups
@@ -1012,7 +1014,7 @@ customer_kpis AS (
             ELSE 'New' 
         END AS customer_segment,
         
-        -- 2. Age Group Segmentation (Using the pre-calculated age)
+        -- 2. Age Group Segmentation
         CASE 
             WHEN birthdate IS NULL THEN 'Unknown Age'
             WHEN age < 25 THEN 'Under 25'
@@ -1026,9 +1028,11 @@ customer_kpis AS (
 )
 -- Final output: A unified Customer 360 view
 SELECT 
+customer_key,
+    cst_key,
+    customer_name,
     customer_segment,
     age_group,
-    customer_name,
     total_orders,
     total_sales,
     total_quantity,
