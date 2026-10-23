@@ -967,15 +967,17 @@ ORDER BY customer_count DESC;
 - **Static vs. Dynamic Segmentation:** The product cost segmentation is a static dimension analysis (ideal for inventory management). The customer segmentation is a dynamic fact-based analysis (ideal for CRM and marketing campaigns).
 - **Data Quality Alert (The `Unknown` Segment):** The customer segmentation output contains a tiny `Unknown` segment. This is an intentional engineering choice. These customers have missing order dates in the source, so their lifespan cannot be calculated. Instead of silently dropping their revenue, we flag them as `Unknown` to preserve financial integrity and flag upstream data quality issues.
 
+
 ### 👑 13. Final Comprehensive Customer Report (Customer 360 View)
 **Business Question:** *How can we consolidate all key customer metrics and behaviors into a single, analytics-ready view for the marketing and CRM teams?*
 
-In real-world enterprise data stacks, stakeholders often require a **"Customer 360"** view—a One Big Table (OBT) that consolidates all foundational metrics, derived KPIs, and segmentation flags into a single grain (one row per customer). This eliminates the need for downstream analysts to repeatedly write complex `JOIN` and `GROUP BY` logic.
+In real-world enterprise data stacks, stakeholders often require a **"Customer 360"** view—a One Big Table (OBT) that consolidates all foundational metrics, derived KPIs, and segmentation flags into a single grain (one row per customer). 
 
-To achieve this efficiently, we use a multi-layered CTE approach: first aggregating base metrics, then calculating derived KPIs and segments.
+**To ensure high performance and BI readiness, this report is materialized as a Physical Table in the Gold layer using dbt (`materialized='table'`).** If this complex aggregation were left as a View, every time a BI dashboard loaded, it would trigger a full-table recalculation (millions of rows), causing severe performance degradation. Materializing it as a table trades a tiny amount of storage for lightning-fast query speeds.
 
 ```sql
-%sql
+{{ config(materialized='table', schema='gold') }}
+
 WITH customer_orders AS (
     -- Layer 1: Base metrics at the customer grain
     SELECT 
@@ -993,15 +995,20 @@ WITH customer_orders AS (
         MIN(fs.sls_order_dt) AS first_purchase,
         MAX(fs.sls_order_dt) AS last_purchase,
         DATEDIFF(month, MIN(fs.sls_order_dt), MAX(fs.sls_order_dt)) AS lifespan_months
-    FROM crm_dbt_dev.gold.fct_sales fs
-    LEFT JOIN crm_dbt_dev.gold.dim_customers c 
+    FROM {{ ref('fct_sales') }} fs
+    LEFT JOIN {{ ref('dim_customers') }} c 
         ON fs.customer_key = c.customer_key
-    GROUP BY c.customer_key, c.cst_key, customer_name, c.birthdate
+    GROUP BY 
+        c.customer_key, 
+        c.cst_key, 
+        customer_name, 
+        c.birthdate
 ),
 customer_kpis AS (
     -- Layer 2: Derived KPIs, Segmentation, and Age Groups
     SELECT 
         *,
+        -- Use NULLIF to prevent Divide by Zero and return NULL for undefined metrics
         ROUND(total_sales / NULLIF(total_orders, 0), 2) AS avg_order_value,
         ROUND(total_sales / NULLIF(lifespan_months, 0), 2) AS avg_monthly_spend,
         DATEDIFF(month, last_purchase, current_date()) AS recency_months,
@@ -1046,10 +1053,12 @@ FROM customer_kpis
 ORDER BY total_sales DESC;
 ```
 
-**💡 Engineering & Business Value Notes:**
-- **Layered CTE Architecture:** Calculating 8+ metrics with conditional logic in a single `SELECT` is error-prone and unreadable. This query uses **two distinct CTE layers**: Layer 1 handles the raw aggregation, and Layer 2 calculates the derived ratios (`avg_order_value`, `avg_monthly_spend`) and the `CASE WHEN` segmentation. This guarantees high maintainability.
-- **Defensive Programming (`NULLIF`):** When calculating `avg_order_value` and `avg_monthly_spend`, we use `NULLIF(denominator, 0)` to prevent fatal `Divide by Zero` errors for edge-case customers.
-- **Business Value (The 360 View):** This final output serves as the ultimate "Customer 360" asset. The CRM team can directly query this table to execute highly targeted campaigns (e.g., targeting `VIP` customers with low `recency_months`, or `Regular` customers with high `avg_monthly_spend` to upsell them to VIP status).
+**💡 Engineering & Architecture Notes:**
+- **Materialization Strategy (Table vs. View):** The reference tutorial often creates such reports as Views to save development time. However, I deliberately configured this dbt model as `materialized='table'`. This is a crucial enterprise architecture decision: it physically pre-computes the heavy aggregations and window functions in the Gold layer. When BI tools query this table, the response is instant, saving massive compute costs and preventing dashboard timeouts.
+- **Automated DAG Management:** By using `{{ ref('fct_sales') }}` and `{{ ref('dim_customers') }}`, dbt automatically resolves the dependency graph (DAG). It ensures this Customer 360 table is only built *after* the Fact and Dimension tables are successfully updated.
+- **Code Review: Fixing Two Critical Flaws in the Reference Tutorial's KPI Logic:**
+    1.  **The `AOV` Denominator Trap:** A common tutorial anti-pattern is `CASE WHEN total_sales = 0 THEN 0 ELSE total_sales / total_orders`. This is mathematically flawed because it checks the numerator (`total_sales`) instead of the actual divisor (`total_orders`). If an order count is 0, it will crash. Furthermore, returning `0` distorts averages. My solution uses `NULLIF(total_orders, 0)` to return `NULL` (undefined), which is statistically correct.
+    2.  **The Monthly Spend Distortion:** The tutorial uses `CASE WHEN lifespan = 0 THEN total_sales ELSE total_sales / lifespan`. This is a severe business logic error. If a customer's lifespan is 0 (only bought once), it incorrectly assumes their total sales amount is their *monthly* spend. My implementation uses `NULLIF(lifespan_months, 0)` to return `NULL`, preventing the inflation of monthly spending metrics for one-time buyers.
 
 ---
 
