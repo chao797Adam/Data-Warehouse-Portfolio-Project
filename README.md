@@ -655,6 +655,79 @@ LIMIT 10;
 - **Handling Orphaned Records & Churn Risk:** Because we use `LEFT JOIN`, any transaction without a matching dimension record will result in a `NULL` grouping. For churn risk analysis, sorting ascending (`ASC`) helps the marketing team identify low-frequency buyers for re-engagement campaigns.
 - **SQL Best Practice:** While `GROUP BY 1, 2, 3` is valid, production-level dbt models should use explicit column names to prevent bugs if the `SELECT` order changes. 
 
+
+### 📅 6. Yearly Business Performance & YoY Growth
+**Business Question:** *How is our business performing year over year in terms of revenue, active customers, and volume, and what is the growth rate?*
+
+To get a comprehensive view of the business trajectory, we aggregate core KPIs per year and use the `LAG()` window function to calculate Year-over-Year (YoY) revenue growth:
+
+```sql
+WITH yearly_sales AS (
+    SELECT 
+        YEAR(sls_order_dt) AS order_year, 
+        SUM(sls_sales) AS total_revenue,
+        COUNT(DISTINCT customer_key) AS total_active_customers,
+        SUM(sls_quantity) AS total_quantity
+    FROM crm_dbt_dev.gold.fct_sales
+    WHERE sls_order_dt IS NOT NULL
+    GROUP BY YEAR(sls_order_dt)
+)
+SELECT 
+    order_year,
+    total_revenue,
+    total_active_customers,
+    total_quantity,
+    -- Calculate Year-over-Year (YoY) Revenue Growth
+    LAG(total_revenue) OVER (ORDER BY order_year) AS prev_year_revenue,
+    ROUND(
+        (total_revenue - LAG(total_revenue) OVER (ORDER BY order_year)) 
+        / LAG(total_revenue) OVER (ORDER BY order_year) * 100, 
+    2) AS yoy_growth_pct
+FROM yearly_sales
+ORDER BY order_year ASC;
+```
+
+**💡 Engineering & Business Notes:**
+- **The Power of `COUNT(DISTINCT ...)`:** Because our fact table is at the line-item grain (one order can contain multiple products), we must use `COUNT(DISTINCT customer_key)` to find the true number of *unique* active customers per year. A simple `COUNT` would overcount if a customer made multiple purchases in the same year.
+- **`LAG()` for YoY Growth:** `LAG(total_revenue)` allows us to look back at the previous year's revenue without writing a self-join. This is a standard analytics engineering pattern for time-series comparisons.
+- **Handling Null Dates:** The `WHERE sls_order_dt IS NOT NULL` clause filters out orphaned records (corrupted dates set to `NULL` during cleaning). This prevents the time-series chart from breaking.
+- **Business Insight:** This query immediately exposes the explosive growth in **2013 (+131% YoY)** and the sharp drop in **2014**, which is highly likely due to incomplete data ingestion for that year rather than a real business collapse—a key insight for data quality monitoring.
+
+### 📅 7. Seasonality Analysis: Monthly Sales Trends
+**Business Question:** *Which months have the highest (and lowest) sales performance across the years?*
+
+To analyze seasonality (e.g., holiday peaks in December vs. slow months in February), we extract the month and aggregate the metrics. 
+
+```sql
+SELECT 
+    MONTH(sls_order_dt) AS order_month, 
+    SUM(sls_sales) AS total_revenue,
+    COUNT(DISTINCT customer_key) AS total_active_customers,
+    SUM(sls_quantity) AS total_quantity
+FROM crm_dbt_dev.gold.fct_sales
+WHERE sls_order_dt IS NOT NULL
+GROUP BY MONTH(sls_order_dt)
+ORDER BY total_revenue DESC;
+```
+
+**💡 Engineering & Business Notes:**
+- **The Pitfall of `MONTH()` Without `YEAR()`:** In the query above, data from December 2010, December 2011, and December 2013 are all grouped into a single `order_month = 12`. While this is useful for a high-level seasonal overview, it combines multiple years of data. 
+- **Advanced Seasonality (Best Practice):** For a rigorous time-series analysis, you must group by both `YEAR()` and `MONTH()` to observe the specific trend of each month across each year.
+
+```sql
+-- Advanced: Monthly trend across specific years
+SELECT 
+    YEAR(sls_order_dt) AS order_year,
+    MONTH(sls_order_dt) AS order_month,
+    SUM(sls_sales) AS total_revenue
+FROM crm_dbt_dev.gold.fct_sales
+WHERE sls_order_dt IS NOT NULL
+GROUP BY YEAR(sls_order_dt), MONTH(sls_order_dt)
+ORDER BY order_year ASC, order_month ASC;
+```
+
+- **Business Insight:** By running the first query, we can immediately see that **December is our peak revenue month** (likely driven by holiday shopping), while **February is the slowest month**. The marketing team can use this insight to allocate budget more effectively—aggressively scaling up ads in November/December, and launching retention/promotion campaigns in January/February to offset the post-holiday slump.
+
 ---
 
 ## 9. Reference
