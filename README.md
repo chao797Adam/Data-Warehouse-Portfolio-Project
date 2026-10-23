@@ -728,6 +728,62 @@ ORDER BY order_year ASC, order_month ASC;
 
 - **Business Insight:** By running the first query, we can immediately see that **December is our peak revenue month** (likely driven by holiday shopping), while **February is the slowest month**. The marketing team can use this insight to allocate budget more effectively—aggressively scaling up ads in November/December, and launching retention/promotion campaigns in January/February to offset the post-holiday slump.
 
+### 📈 8. Yearly Cumulative Business Growth (Running Totals)
+**Business Question:** *How has our total revenue accumulated over the years?*
+
+To understand the macro trajectory of the business, we use a window function to calculate the running total of revenue by year. This creates a "Hockey Stick" curve that clearly highlights periods of explosive growth.
+
+```sql
+WITH yearly_metrics AS (
+    SELECT 
+        YEAR(sls_order_dt) AS order_year, 
+        SUM(sls_sales) AS total_revenue
+    FROM crm_dbt_dev.gold.fct_sales
+    WHERE sls_order_dt IS NOT NULL
+    GROUP BY YEAR(sls_order_dt)
+)
+SELECT 
+    order_year, 
+    total_revenue, 
+    SUM(total_revenue) OVER (ORDER BY order_year) AS cumulative_revenue
+FROM yearly_metrics
+ORDER BY order_year ASC;
+```
+
+**📊 Visualization & Business Insights:**
+![Running Total by Year](assets/running_total_by_year.png)
+
+- **The "Hockey Stick" Growth:** The chart reveals a massive revenue jump in 2013, causing the cumulative line to steepen dramatically. This indicates the business found a highly successful scaling strategy that year.
+- **Data Quality Detection:** Notice how the blue line (annual revenue) drops to near zero in 2014, causing the orange cumulative line to flatline. This visual anomaly instantly alerts us to the fact that **the 2014 dataset is incomplete**, preventing stakeholders from misinterpreting missing data as a business collapse.
+
+### 📅 9. Monthly Cumulative Business Growth (High-Resolution)
+**Business Question:** *How has our revenue accumulated month-over-month, and when exactly did our growth accelerate?*
+
+By using `date_trunc('month', sls_order_dt)`, we preserve the `DATE` data type (e.g., `2013-05-01`). This ensures BI tools can natively render a continuous time-series axis without manual string concatenation.
+
+```sql
+WITH monthly_sales AS (
+    SELECT 
+        date_trunc('month', sls_order_dt) AS order_month,
+        SUM(sls_sales) AS total_revenue
+    FROM crm_dbt_dev.gold.fct_sales
+    WHERE sls_order_dt IS NOT NULL
+    GROUP BY date_trunc('month', sls_order_dt)
+)
+SELECT 
+    order_month,
+    total_revenue, 
+    SUM(total_revenue) OVER (ORDER BY order_month) AS total_rev_cumulative 
+FROM monthly_sales
+ORDER BY order_month ASC;
+```
+
+**📊 Visualization & Business Insights:**
+![Running Total by Month](assets/running_total_by_month.png)
+
+- **Granularity Alignment:** The `GROUP BY` establishes the month-level grain, and the `OVER (ORDER BY order_month)` perfectly mirrors it. This guarantees the running total increments smoothly without skipping months.
+- **Operational Focus:** The monthly cumulative chart provides a high-resolution timeline. It allows operations teams to pinpoint the exact months in 2013 where the business shifted from linear growth to exponential growth, making it easier to tie specific marketing campaigns or product launches to revenue spikes.
+
 ---
 
 ## 9. Reference
