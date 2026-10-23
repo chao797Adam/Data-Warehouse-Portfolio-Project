@@ -793,6 +793,45 @@ While exploring different analytical approaches, I identified a critical mathema
 
 By identifying and correcting this "average of averages" trap, I ensured that all business KPIs in this project remain statistically sound and volume-weighted.
 
+### 📊 10. Product-Level YoY Performance & Historical Comparison
+**Business Question:** *For each product, how does its current year's sales compare to its previous year's sales and its historical average?*
+
+This is a complex analytical requirement. To solve it, we first aggregate the data to the correct grain `(Year, Product)` using a CTE, and then apply window functions to compare different time periods without writing complex self-joins.
+
+```sql
+WITH product_yearly_sales AS (
+    SELECT 
+        YEAR(fs.sls_order_dt) AS order_year,
+        dp.prd_nm,
+        SUM(fs.sls_sales) AS current_year_sales
+    FROM crm_dbt_dev.gold.fct_sales fs
+    LEFT JOIN crm_dbt_dev.gold.dim_products dp 
+        ON fs.product_key = dp.product_key
+    WHERE fs.sls_order_dt IS NOT NULL
+    GROUP BY YEAR(fs.sls_order_dt), dp.prd_nm
+)
+SELECT 
+    order_year,
+    prd_nm,
+    current_year_sales,
+    -- 1. Look back 1 row to get previous year's sales
+    LAG(current_year_sales) OVER (
+        PARTITION BY prd_nm 
+        ORDER BY order_year
+    ) AS prev_year_sales,
+    -- 2. Calculate the moving historical average for this product
+    ROUND(AVG(current_year_sales) OVER (
+        PARTITION BY prd_nm
+    ), 2) AS avg_historical_sales
+FROM product_yearly_sales
+ORDER BY prd_nm, order_year;
+```
+
+**💡 Engineering & Business Value Notes:**
+- **Why two steps (CTE + Window Functions)?** Without the CTE, calculating "previous year" would require a self-join (`a.year = b.year - 1`), which is slow and messy. By first aggregating to `(Year, Product)` grain, we can use `LAG()` to simply "look back one row" for the previous year, and `AVG() OVER (PARTITION BY prd_nm)` to calculate the historical baseline. This approach is highly performant and readable.
+- **Business Insight:** This query helps category managers identify "decaying winners." A product might be growing year-over-year (e.g., +5%), but if its current sales are still far below its historical average, it indicates the product has peaked and is slowly losing market share. This level of analysis is crucial for inventory forecasting and product lifecycle management.
+
+
 ---
 
 ## 9. Reference
