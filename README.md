@@ -1032,7 +1032,7 @@ SELECT
     total_orders,
     total_sales,
     total_quantity,
-    total_products, -- Added here
+    total_products, 
     avg_order_value,
     avg_monthly_spend,
     recency_months,
