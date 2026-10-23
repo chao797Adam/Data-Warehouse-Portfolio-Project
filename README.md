@@ -793,10 +793,11 @@ While exploring different analytical approaches, I identified a critical mathema
 
 By identifying and correcting this "average of averages" trap, I ensured that all business KPIs in this project remain statistically sound and volume-weighted.
 
-### 📊 10. Product-Level YoY Performance & Historical Comparison
-**Business Question:** *For each product, how does its current year's sales compare to its previous year's sales and its historical average?*
 
-This is a complex analytical requirement. To solve it, we first aggregate the data to the correct grain `(Year, Product)` using a CTE, and then apply window functions to compare different time periods without writing complex self-joins.
+### 📊 10. Product-Level YoY Performance & Historical Comparison
+**Business Question:** *For each product, how does its current year's sales compare to its previous year, its historical average, and is it overperforming or underperforming?*
+
+This query uses a CTE to establish the `(Year, Product)` grain, then applies window functions to calculate YoY growth, historical baseline, variance, and a dynamic performance flag.
 
 ```sql
 WITH product_yearly_sales AS (
@@ -814,23 +815,29 @@ SELECT
     order_year,
     prd_nm,
     current_year_sales,
-    -- 1. Look back 1 row to get previous year's sales
+    -- 1. Previous Year Sales
     LAG(current_year_sales) OVER (
         PARTITION BY prd_nm 
         ORDER BY order_year
     ) AS prev_year_sales,
-    -- 2. Calculate the moving historical average for this product
+    -- 2. Historical Average
     ROUND(AVG(current_year_sales) OVER (
         PARTITION BY prd_nm
-    ), 2) AS avg_historical_sales
+    ), 2) AS avg_historical_sales,
+    -- 3. Deviation from Average
+    ROUND(current_year_sales - AVG(current_year_sales) OVER (PARTITION BY prd_nm), 2) AS avg_sales_deviation,
+    -- 4. Performance Flag
+    CASE 
+        WHEN current_year_sales > AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Above Average'
+        ELSE 'Below Average'
+    END AS performance_flag
 FROM product_yearly_sales
 ORDER BY prd_nm, order_year;
 ```
 
 **💡 Engineering & Business Value Notes:**
-- **Why two steps (CTE + Window Functions)?** Without the CTE, calculating "previous year" would require a self-join (`a.year = b.year - 1`), which is slow and messy. By first aggregating to `(Year, Product)` grain, we can use `LAG()` to simply "look back one row" for the previous year, and `AVG() OVER (PARTITION BY prd_nm)` to calculate the historical baseline. This approach is highly performant and readable.
-- **Business Insight:** This query helps category managers identify "decaying winners." A product might be growing year-over-year (e.g., +5%), but if its current sales are still far below its historical average, it indicates the product has peaked and is slowly losing market share. This level of analysis is crucial for inventory forecasting and product lifecycle management.
-
+- **Modular Analytical Thinking:** Instead of hardcoding complex subqueries, we calculate the `AVG()` baseline once in the window function, then reuse it to calculate both the numerical deviation (`current - avg`) and the categorical flag (`Above/Below Average`). 
+- **Business Insight (Identifying "Decaying Winners"):** This query is crucial for product lifecycle management. By combining `prev_year_sales` with `performance_flag`, category managers can instantly spot "Decaying Winners"—products that are still growing YoY but have dropped below their historical average. This signals it's time to adjust inventory or plan a replacement product.
 
 ---
 
