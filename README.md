@@ -810,35 +810,47 @@ WITH product_yearly_sales AS (
         ON fs.product_key = dp.product_key
     WHERE fs.sls_order_dt IS NOT NULL
     GROUP BY YEAR(fs.sls_order_dt), dp.prd_nm
+),
+comparison_cte AS (
+    SELECT 
+        order_year,
+        prd_nm,
+        current_year_sales,
+        AVG(current_year_sales) OVER (PARTITION BY prd_nm) AS avg_historical_sales,
+        LAG(current_year_sales) OVER (PARTITION BY prd_nm ORDER BY order_year) AS prev_year_sales
+    FROM product_yearly_sales
 )
 SELECT 
     order_year,
     prd_nm,
     current_year_sales,
-    -- 1. Previous Year Sales
-    LAG(current_year_sales) OVER (
-        PARTITION BY prd_nm 
-        ORDER BY order_year
-    ) AS prev_year_sales,
-    -- 2. Historical Average
-    ROUND(AVG(current_year_sales) OVER (
-        PARTITION BY prd_nm
-    ), 2) AS avg_historical_sales,
-    -- 3. Deviation from Average
-    ROUND(current_year_sales - AVG(current_year_sales) OVER (PARTITION BY prd_nm), 2) AS avg_sales_deviation,
-    -- 4. Performance Flag
-        CASE 
-        WHEN current_year_sales > AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Above Avg'
-        WHEN current_year_sales < AVG(current_year_sales) OVER (PARTITION BY prd_nm) THEN 'Below Avg'
-        ELSE 'Avg'
-    END AS performance_flag
-FROM product_yearly_sales
-ORDER BY prd_nm, order_year;
+    ROUND(avg_historical_sales, 2) AS avg_sales,
+    ROUND(current_year_sales - avg_historical_sales, 2) AS diff_avg,
+    prev_year_sales,
+    ROUND(current_year_sales - prev_year_sales, 2) AS diff_prev_year,
+    
+    -- 1. Compared to Historical Average
+    CASE 
+        WHEN current_year_sales > avg_historical_sales THEN 'Above Avg'
+        WHEN current_year_sales < avg_historical_sales THEN 'Below Avg'
+        ELSE 'At Avg'
+    END AS avg_change_flag,
+    
+    -- 2. Compared to Previous Year (Handling the first year explicitly)
+    CASE 
+        WHEN prev_year_sales IS NULL THEN 'No Baseline'
+        WHEN current_year_sales > prev_year_sales THEN 'Increase'
+        WHEN current_year_sales < prev_year_sales THEN 'Decrease'
+        ELSE 'No Change'
+    END AS py_change_flag
+        
+FROM comparison_cte
+ORDER BY prd_nm, order_year ASC;
 ```
 
 **💡 Engineering & Business Value Notes:**
-- **Modular Analytical Thinking:** Instead of hardcoding complex subqueries, we calculate the `AVG()` baseline once in the window function, then reuse it to calculate both the numerical deviation (`current - avg`) and the categorical flag (`Above/Below Average`). 
-- **Business Insight (Identifying "Decaying Winners"):** This query is crucial for product lifecycle management. By combining `prev_year_sales` with `performance_flag`, category managers can instantly spot "Decaying Winners"—products that are still growing YoY but have dropped below their historical average. This signals it's time to adjust inventory or plan a replacement product.
+- **Explicit Edge Case Handling:** The first year of a product's lifecycle (`prev_year_sales IS NULL`) is explicitly flagged as `'No Baseline'` rather than `'No Change'`. This preserves the semantic difference between "unknown year-over-year performance" and "zero year-over-year growth". 
+- **BI Flexibility:** By outputting `avg_change_flag` and `py_change_flag` as separate columns, analysts can dynamically slice the data (e.g., filtering for products that are `Above Avg` but marked as `Decrease`), which identifies "decaying winners" early.
 
 ---
 
